@@ -62,31 +62,46 @@ int split_command(char *buffer, char** result) {
 }
 
 
-void recv_file(int co_s, char *name, char *path) {
+void recv_file(int co_s, char *name, char *path, int file_size) {
 
     char buffer[1024];
-    int bytes_received;
+    int bytes;
     int total_received = 0;
-    
+
     chdir(path);
 
     int fd = open(name, O_CREAT | O_WRONLY, 0644);
 
-    while ((bytes_received = recv(co_s, buffer, 1024, 0)) > 0) {
-        if (write(fd, buffer, bytes_received) != bytes_received) {
-            perror("write failed");
+    while (total_received < file_size) {
+        // Calculate how much to receive (don't exceed buffer size)
+        int to_receive = 1024;
+        if (file_size - total_received < 1024) {
+            to_receive = file_size - total_received;
+        }
+        
+        bytes = recv(co_s, buffer, to_receive, 0);
+        
+        // Handle errors and connection close
+        if (bytes <= 0) {
+            if (bytes == 0) {
+                fprintf(stdout, "Connection closed by peer\n");
+            } else {
+                perror("recv failed");
+            }
             break;
         }
-        total_received += bytes_received;
+        
+        write(fd, buffer, bytes);
+        total_received += bytes;
     }
 
-    if (bytes_received == 0) {
-        printf("Connection closed by sender\n");
-    } else if (bytes_received < 0) {
+    if (bytes == 0) {
+        fprintf(stdout, "Connection closed by sender\n");
+    } else if (bytes < 0) {
         perror("recv failed");
     }
 
-    printf("File %s created. Total %d bytes written.", name, total_received);
+    fprintf(stdout, "File %s created. Total %d bytes written.\n", name, total_received);
 
 }
 
@@ -106,7 +121,7 @@ char* create_dest(char *path) {
     char command[256];
     char *abs_path = get_abs_path(path);
 
-    snprintf(command, "mkdir -p %s", abs_path);
+    snprintf(command, sizeof(command), "mkdir -p %s", abs_path);
     system(command);
 
     return abs_path;
@@ -114,14 +129,23 @@ char* create_dest(char *path) {
 
 
 void uploadf(int connection_socket, int count, char *tokens[]) {
+    int file_size = 0;
+
     char *destination_path = tokens[count - 1];
 
     char *path = create_dest(destination_path);
 
+    fprintf(stdout, "%s\n", path);
     for(int i=1; i<count-1; i++) {
-        recv_file(connection_socket, tokens[i], path);
+
+        fprintf(stdout, "Iter %d\n", i);
+        int bytes_received = recv(connection_socket, &file_size, sizeof(int), 0);
+        fprintf(stdout, "Size of file %s received is %d\n", tokens[i], file_size);
+
+        recv_file(connection_socket, tokens[i], path, file_size);
     }
 
+    fprintf(stdout, "Files received from uploadf\n");
 }
 
 void prcclient(int conn_soc, int *cl_s) {
@@ -134,7 +158,9 @@ void prcclient(int conn_soc, int *cl_s) {
         bytes_read = recv(conn_soc, buff, 1024, 0);
         buff[bytes_read] = '\0';
 
-        printf("Received commmand: %s", buff);
+        fprintf(stdout, "%d\n", bytes_read);
+
+        fprintf(stdout, "Received commmand: %s\n", buff);
 
         int count = split_command(buff, tokens);
 
@@ -181,7 +207,7 @@ void connect_client(int *client_socket) {
     servAdd.sin_family = AF_INET;
     // servAdd.sin_addr.s_addr = htonl(INADDR_ANY);
     servAdd.sin_addr.s_addr = inet_addr("127.0.0.1");
-    sscanf("5088", "%d", &portNumber);
+    sscanf("15088", "%d", &portNumber);
     servAdd.sin_port = htons((uint16_t)portNumber);
 
     bind(ls,(struct sockaddr*)&servAdd,sizeof(servAdd));
@@ -190,13 +216,12 @@ void connect_client(int *client_socket) {
 
     if (getsockname(ls, (struct sockaddr *)&servAdd, &len) == 0) {
         inet_ntop(AF_INET, &servAdd.sin_addr, ip_str, INET_ADDRSTRLEN);
-        printf("Server listening on IP: %s, Port: %d\n", ip_str, ntohs(servAdd.sin_port));
+        fprintf(stdout, "Server listening on IP: %s, Port: %d\n", ip_str, ntohs(servAdd.sin_port));
     } else {
         perror("getsockname failed");
     }
 
     while(1){
-
     
         // int client_socket_fd = accept(server_socket_fd, (struct sockaddr *)&client_addr, &client_addr_len);
         if((cs = accept(ls, (struct sockaddr*)&client_addr, &client_addr_len)) == -1) {
@@ -213,7 +238,7 @@ void connect_client(int *client_socket) {
             port = ntohs(s->sin6_port);
             inet_ntop(AF_INET6, &s->sin6_addr, ip_str, sizeof(ip_str));
         }
-        printf("Client connected: %s:%d\n", ip_str, port);
+        fprintf(stdout, "Client connected: %s:%d\n", ip_str, port);
 
         if((pid = fork()) == 0) {
             prcclient(cs, client_socket);
