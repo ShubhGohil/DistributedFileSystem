@@ -3,10 +3,24 @@
 #include <netinet/in.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdlib.h>
+#include <arpa/inet.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <errno.h>
+
 
 #define MAX_ARGS 1024
 #define FAIL 0
 #define PASS 1
+
+extern int errno;
+
+
+typedef struct {
+    char name[512];
+    int size;
+} File_header;
 
 
 int connect_server(int argc, char* argv[]) {
@@ -42,7 +56,7 @@ int connect_server(int argc, char* argv[]) {
     return client_socket;
 }
 
-int check_name(char *files[], int *command) {
+int check_name(char *files[], char *command) {
     if(strcmp(files[0], command)) {
         fprintf(stderr, "Invalid command name\n");
         return FAIL;
@@ -52,15 +66,16 @@ int check_name(char *files[], int *command) {
 
 
 int verify_path(char *name) {
-    if(access(name, F_OK))
+    if(!access(name, F_OK))
         return PASS;
+    fprintf(stderr, "Invalid filepath\n");
     return FAIL;
 }
 
 
 int verify_ext(char *name) {
-    char *index = strrchr(name, ".");
-    (!index || !strcmp(index, ".pdf") || !strcmp(index, ".c") || !strcmp(index, ".txt") || !strcmp(index, ".zip")) {
+    char *index = strrchr(name, '.');
+    if (!index || !(!strcmp(index, ".pdf") || !strcmp(index, ".c") || !strcmp(index, ".txt") || !strcmp(index, ".zip"))) {
         fprintf(stderr, "Invalid file types\n");
         return FAIL;
     }
@@ -69,61 +84,130 @@ int verify_ext(char *name) {
 
 
 int check_file_path_and_ext(char *files[], int count) {
-    for(int i=1; i<count-1; i++) {
-        return (verify_ext(files[i]) && verify_path(files[i]));
-    }
-    return FAIL;
+    	int check = 1;
+	for(int i=1; i<count-1; i++) {
+        	if(!(verify_ext(files[i]) && verify_path(files[i]))) {
+			return FAIL;
+		}
+    	}
+    return PASS;
 }
 
 
-int parse_command_up(char *input) {
+int parse_command_up(char *input, char* files[], int *i) {
     
-    int i=0;
-    char *files[5] = {0};
+    *i=0;
     char *inputcopy = strdup(input);
     
     char *token = strtok(inputcopy, " ");
     while(token != NULL) {
-        files[i++] = strdup(token);
+        files[(*i)++] = strdup(token);
         token = strtok(NULL, " ");
     }
 
-    return (check_name(files, "uploadlf") && check_file_path_and_ext(files, i));
+    if(strncmp(files[*i - 1], "~/S1", 4)) {
+        fprintf(stdout, "Invalid server addr\n");
+        return 0;
+    }
+
+
+    if(*i < 3) {
+        fprintf(stderr, "Not enough arguments\n");
+        return FAIL;
+    }
+
+    return (check_name(files, "uploadf") && check_file_path_and_ext(files, *i));
 }
 
 
-void uploadlf() {
+void send_header(int cl_s, char *fname) {
+    File_header fh;
+    struct stat st;
 
+    strncpy(fh.name, fname, sizeof(fh.name) - 1);
+    fh.name[sizeof(fh.name) - 1] = '\0';
+    
+    stat(fname, &st);
+    fh.size = st.st_size;
+
+    send(cl_s, &fh, sizeof(fh), 0);
+    
+    fprintf(stdout, "Sent header data: Name-%s, size-%d\n", fh.name, fh.size);
+}
+
+
+void send_data(int cl_s, char *name) {
+    
+    int bytes_read, total_sent;
+    char buffer[1024];
+
+    int fd = open(name, O_RDONLY);
+
+    while ((bytes_read = read(fd, buffer, 1024)) > 0) {
+        if (send(cl_s, buffer, bytes_read, MSG_NOSIGNAL) != bytes_read) {
+            if (errno == EPIPE) {
+                printf("Broken pipe detected - connection closed by server\n");
+                exit(0);
+            }
+        }
+        total_sent+=bytes_read;
+    }
+    fprintf(stdout, "File name: %s, Total bytes: %d\n", name, total_sent);
+}
+
+
+void send_files(int socket, char *filename) {
+    send_header(socket, filename);
+	send_data(socket, filename);
+}
+
+
+void uploadf(int cl_s, char *input, char *files[], int *count) {
+
+    send(cl_s, input, sizeof(input), 0);
+
+	for(int i=1; i < *count - 1; i++) {
+		send_files(cl_s, files[i]);
+	}
+
+    fprintf(stdout, "\nFiles uploaded\n");
 }
 
 
 void get_commands(int cl_s) {
     
     char input[MAX_ARGS];
+    char *files[5] = {0};
+    int count;
 
     while(1) {
         printf("s25client$ ");
         fgets(input, MAX_ARGS, stdin);
         input[strcspn(input, "\n")] = 0;
 
-        if(strstr(input, "uploadlf")) {
-            if(parse_command_up(input)) {
-                uploadlf(input);
+	if(!strcmp(input, "exit")) {
+		fprintf(stdout, "I am shutting down. See you next time!\n");
+		exit(0);
+	}
+
+        if(strstr(input, "uploadf")) {
+            if(parse_command_up(input, files, &count)) {
+                uploadf(cl_s, input, files, &count);
             }
         } else if(strstr(input, "downlf")) {
-            if(parse_command_up(input)) {
+            if(parse_command_up(input, files, &count)) {
                 
             }
         } else if(strstr(input, "removef")) {
-            if(parse_command_up(input)) {
+            if(parse_command_up(input, files, &count)) {
                 
             }
         } else if(strstr(input, "downltar")) {
-            if(parse_command_up(input)) {
+            if(parse_command_up(input, files, &count)) {
                 
             }
         } else if(strstr(input, "dispfnames")) {
-            if(parse_command_up(input)) {
+            if(parse_command_up(input, files, &count)) {
                 
             }
         }
