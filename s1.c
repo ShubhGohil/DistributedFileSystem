@@ -1,12 +1,25 @@
+#define _DEFAULT_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <pthread.h>
 #include <string.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <dirent.h>
+
+
+extern int errno;
+
+typedef struct {
+    char *name[512];
+    int count;
+} File_names;
+
 
 void connect_servers(int *client_socket, char **server_ip, int *server_port) {
     socklen_t len;
@@ -14,6 +27,9 @@ void connect_servers(int *client_socket, char **server_ip, int *server_port) {
     int portNumber;
 
     for(int i=0; i<3; i++) {
+
+        printf("Server IP: %s:%d\n", server_ip[i], server_port[i]);
+
         if ((client_socket[i]=socket(AF_INET,SOCK_STREAM,0))<0){ //socket()
             fprintf(stderr, "Cannot create socket\n");
             exit(1);
@@ -34,9 +50,8 @@ void connect_servers(int *client_socket, char **server_ip, int *server_port) {
             exit(2);
         }
 
-
-        if(connect(client_socket[i], (struct sockaddr  *) &servAdd,sizeof(servAdd))<0){//Connect()
-            fprintf(stderr, "connect() failed, exiting\n");
+        if(connect(client_socket[i], (struct sockaddr *) &servAdd,sizeof(servAdd))<0){//Connect()
+            fprintf(stderr, "connect() failed, exiting %s\n", strerror(errno));
             exit(3);
         }
     }
@@ -59,6 +74,41 @@ int split_command(char *buffer, char** result) {
     }
 
     return count;
+}
+
+
+void send_file(int cl_s, char *name) {
+    int bytes_read;
+    int total_sent = 0;
+    char buffer[1024];
+
+    int fd = open(name, O_RDONLY);
+    if (fd < 0) {
+        perror("open failed");
+        return;
+    }
+
+    while ((bytes_read = read(fd, buffer, sizeof(buffer))) > 0) {
+        int sent = send(cl_s, buffer, bytes_read, MSG_NOSIGNAL);
+        if (sent != bytes_read) {
+            if (sent < 0 && errno == EPIPE) {
+                fprintf(stderr, "Broken pipe detected - connection closed by server\n");
+                close(fd);
+                return;
+            }
+            perror("send failed");
+            close(fd);
+            return;
+        }
+        total_sent += sent;
+    }
+
+    if (bytes_read < 0) {
+        perror("read failed");
+    }
+
+    fprintf(stdout, "File name: %s, Total bytes: %d\n", name, total_sent);
+    close(fd);
 }
 
 
@@ -127,8 +177,57 @@ char* create_dest(char *path) {
     return abs_path;
 }
 
+void tr_file(int *other_server, char *fname, int size, char *path, int server_number) {
 
-void uploadf(int connection_socket, int count, char *tokens[]) {
+    char command[128];
+
+    snprintf(command, sizeof(command), "uploadf %s %s", fname, path);
+    send(other_server[server_number - 2], command, strlen(command), 0);
+    fprintf(stdout, "Command %s sent to S%d\n", command, server_number);
+
+    send(other_server[server_number - 2], &size, sizeof(int), 0);
+    fprintf(stdout, "Bytes %d to be sent to S%d\n", size, server_number);
+
+    char *full_path = malloc(strlen(fname) + strlen(path) + 1);
+
+    strcpy(full_path, path);
+    strcat(full_path, "/");
+    strcat(full_path, fname);
+
+    fprintf(stdout, "Full path: %s\n", full_path);
+
+    send_file(other_server[server_number - 2], get_abs_path(full_path));
+    fprintf(stdout, "File %s uploaded to S%d\n", fname, server_number);
+
+    if (remove(get_abs_path(full_path)) == 0) {
+        printf("File '%s' deleted successfully.\n", full_path);
+    } else {
+        perror("Error deleting file\n");
+    }
+
+}
+
+void transfer_up(int *other_server, char *fname, int size, char *path) {
+    
+    char *index = strrchr(fname, '.');
+
+    if(!strcmp(index, ".zip")) {
+
+        tr_file(other_server, fname, size, path, 4);
+
+    } else if(!strcmp(index, ".pdf")) {
+
+        tr_file(other_server, fname, size, path, 2);
+
+    } else if(!strcmp(index, ".txt")) {
+
+        tr_file(other_server, fname, size, path, 3);
+
+    }
+}
+
+
+void uploadf(int connection_socket, int count, char *tokens[], int *cl_s) {
     int file_size = 0;
 
     char *destination_path = tokens[count - 1];
@@ -138,15 +237,220 @@ void uploadf(int connection_socket, int count, char *tokens[]) {
     fprintf(stdout, "%s\n", path);
     for(int i=1; i<count-1; i++) {
 
-        fprintf(stdout, "Iter %d\n", i);
         int bytes_received = recv(connection_socket, &file_size, sizeof(int), 0);
         fprintf(stdout, "Size of file %s received is %d\n", tokens[i], file_size);
 
         recv_file(connection_socket, tokens[i], path, file_size);
+
+        transfer_up(cl_s, tokens[i], file_size, destination_path);
     }
 
     fprintf(stdout, "Files received from uploadf\n");
 }
+
+
+int transfer_rm(int *cl_s, char *path, int server_number) {
+    char command[128];
+    int result;
+
+    snprintf(command, sizeof(command), "removef %s", path);
+    send(cl_s[server_number - 2], command, strlen(command), 0);
+    fprintf(stdout, "Command %s sent to S%d\n", command, server_number);
+
+    recv(cl_s[server_number - 2], &result, sizeof(int), 0);
+
+    return result;
+}
+
+
+void removef(int connection_socket, int count, char *tokens[], int *cl_s) {
+    int file_size = 0, scount = 0;
+
+    for(int i=1; i<count; i++) {
+
+        char *index = strrchr(tokens[i], '.');
+
+        if(!strcmp(index, ".zip")) {
+
+            scount += transfer_rm(cl_s, tokens[i], 4);
+
+        } else if(!strcmp(index, ".pdf")) {
+
+            scount += transfer_rm(cl_s, tokens[i], 2);
+
+        } else if(!strcmp(index, ".txt")) {
+
+            scount += transfer_rm(cl_s, tokens[i], 3);
+
+        } else {
+            if(remove(get_abs_path(tokens[i])) == 0) {
+                fprintf(stdout, "File %s removed successfully\n", tokens[i]);
+                scount++;
+            } else {
+                fprintf(stdout, "Error while removing file %s\n");
+            }
+        }
+
+    }
+
+    // recv(connection_socket, &count, sizeof(int), 0);
+    fprintf(stdout, "Files deleted sucessfully: %d, Error: %d\n", scount, count - scount - 1);
+}
+
+
+void get_tar(int *cl_s, char *command, char *fname, int s_num, int *file_size) {
+    int bytes_received;
+
+    send(cl_s[s_num-2], command, strlen(command), 0);
+
+    bytes_received = recv(cl_s[s_num-2], file_size, sizeof(int), 0);
+    fprintf(stdout, "Size of tarfile to receive is %d\n", *file_size);
+
+    char *path = malloc(strlen(getenv("HOME")) + strlen("/S1"));
+
+    strcpy(path, getenv("HOME"));
+    strcat(path, "/S1");
+
+    recv_file(cl_s[s_num-2], fname, path, *file_size);
+
+}
+
+
+void send_tar(int cs, int *file_size, char *name) {
+
+    char *path = malloc(strlen(getenv("HOME")) + strlen("/S1"));
+
+    strcpy(path, getenv("HOME"));
+    strcat(path, "/S1/");
+    strcat(path, name);
+
+    send(cs, file_size, sizeof(int), 0);
+    fprintf(stdout, "Sent file size %d to client\n", *file_size);
+    
+    send_file(cs, path);
+
+    if(remove(path) == 0) {
+        fprintf(stdout, "File %s removed successfully\n", name);
+    } else {
+        fprintf(stdout, "Error while removing file %s\n");
+    }
+
+}
+
+
+void downltar(int connection_socket, int count, char *tokens[], int *cl_s) {
+
+    int file_size = 0;
+    char *fname;
+    
+    if(!strcmp(tokens[1], ".txt")) {
+        
+        fname = strdup("txt.tar");
+        fprintf(stdout, "Going to send command downltar to S3\n");
+
+        get_tar(cl_s, tokens[0], fname, 3, &file_size);
+        send_tar(connection_socket, &file_size, fname);
+
+    } else if(!strcmp(tokens[1], ".pdf")) {
+
+        fname = strdup("pdf.tar");
+        fprintf(stdout, "Going to send command downltar to S2\n");
+
+        get_tar(cl_s, tokens[0], fname, 2, &file_size);
+        send_tar(connection_socket, &file_size, fname);
+
+    } else {
+
+        char cmd[512];
+        char *tar_name = "cfiles.tar";
+        char *base_dir = malloc(strlen(getenv("HOME") + strlen("/S1")));
+        struct stat st;
+
+        strcpy(base_dir, getenv("HOME"));
+        strcat(base_dir, "/S1");
+
+        snprintf(cmd, sizeof(cmd), "tar -cvf %s -C %s %s", tar_name, base_dir, base_dir);
+        system(cmd);
+
+            
+        char *tar_path = malloc(strlen(base_dir) + strlen(tar_name));
+        strcpy(tar_path, base_dir);
+        strcat(tar_path, "/");
+        strcat(tar_path, tar_name);
+
+        stat(tar_path, &st);
+        int size = st.st_size;
+
+        send(connection_socket, &size, sizeof(int), 0);
+        fprintf(stdout, "Sent file size %d to client\n", size);
+
+        send_tar(connection_socket, &size, tar_path);
+
+        free(base_dir);
+    }
+
+}
+
+
+int remove_dir(const struct dirent *entry) {
+    return entry->d_type == DT_REG; // Keep only regular files
+}
+
+
+void dispfnames(int connection_socket, int count, char *token[], int *cl_s, char *buff ) {
+
+    struct dirent **fname;
+    char *path = token[1];
+    int n;
+    File_names f = { { NULL }, 0};
+
+    char *abs_path = malloc(strlen(token[1]) + strlen(getenv("HOME")));
+
+    strcpy(abs_path, getenv("HOME"));
+    strcat(abs_path, "/");
+    strcat(abs_path, token[1]);
+
+    n = scandir(abs_path, &fname, remove_dir, alphasort);
+    if (n < 0) {
+        perror("scandir");
+        return;
+    }
+
+    for(int i=0; i<n; i++) {
+        f.name[i] = strdup(fname[i]->d_name);
+        f.count++;
+    }
+
+    for(int i=0; i<3; i++) {
+        
+        File_names *other_files = malloc(sizeof(File_names));
+
+        send(cl_s[i], buff, strlen(buff), 0);
+        fprintf(stdout, "Sent command %s to S%d", buff, i+2);
+
+        recv(cl_s[i], other_files, sizeof(File_names), 0);
+        fprintf(stdout, "Received struct of size %d from S%d", sizeof(File_names), i+2);
+
+        for(int j=0; j<other_files->count; j++) {
+            f.name[f.count+j] = other_files->name[j];
+            other_files->count++;
+        }
+        f.count += other_files->count;
+
+        for(int j=0; j<other_files->count; j++) {
+            free(other_files->name[j]);
+        }
+        free(other_files);
+    }
+
+    send(connection_socket, &f, sizeof(f), 0);
+
+    for (int i = 0; i < n; i++) {
+        free(fname[i]);
+    }
+
+}
+
 
 void prcclient(int conn_soc, int *cl_s) {
     char buff[1024];
@@ -166,7 +470,7 @@ void prcclient(int conn_soc, int *cl_s) {
 
         if(!strcmp(tokens[0], "uploadf")) {
 
-            uploadf(conn_soc, count, tokens);
+            uploadf(conn_soc, count, tokens, cl_s);
 
         } else if(!strcmp(tokens[0], "downlf")) {
 
@@ -174,15 +478,15 @@ void prcclient(int conn_soc, int *cl_s) {
 
         } else if(!strcmp(tokens[0], "removef")) {
 
-            // removef(conn_soc, count, tokens);
+            removef(conn_soc, count, tokens, cl_s);
 
         } else if(!strcmp(tokens[0], "downltar")) {
 
-            // downltar(conn_soc, count, tokens);
+            downltar(conn_soc, count, tokens, cl_s);
 
         } else if(!strcmp(tokens[0], "dispfnames")) {
 
-            // dispfnames(conn_soc, count, tokens);
+            dispfnames(conn_soc, count, tokens, cl_s, buff);
 
         }
     }
@@ -197,7 +501,6 @@ void connect_client(int *client_socket) {
     struct sockaddr_storage client_addr;
 
     socklen_t client_addr_len = sizeof(client_addr);
-
 
     if ((ls=socket(AF_INET,SOCK_STREAM,0))<0){
         fprintf(stderr, "Cannot create socket\n");
@@ -254,15 +557,14 @@ void connect_client(int *client_socket) {
 int main(int argc, char *argv[]) {
 
     char* s_ip[3] = {"127.0.0.1", "127.0.0.1", "127.0.0.1"};
-    int s_port[3] = {5084, 5085, 5086};
+    int s_port[3] = {15084, 15085, 15086};
 
     int *client_s = (int *)malloc(3 * sizeof(int));
 
-    // connect_servers(client_s, s_ip, s_port);
+    connect_servers(client_s, s_ip, s_port);
 
     connect_client(client_s);
 
-    free(client_s);
-   
+    free(client_s);   
     return 0;
 }
