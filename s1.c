@@ -205,6 +205,8 @@ void tr_file(int *other_server, char *fname, int size, char *path, int server_nu
         perror("Error deleting file\n");
     }
 
+    free(full_path);
+
 }
 
 void transfer_up(int *other_server, char *fname, int size, char *path) {
@@ -285,16 +287,17 @@ void removef(int connection_socket, int count, char *tokens[], int *cl_s) {
         } else {
             if(remove(get_abs_path(tokens[i])) == 0) {
                 fprintf(stdout, "File %s removed successfully\n", tokens[i]);
+                send(connection_socket, 1, sizeof(int), 0);
                 scount++;
             } else {
                 fprintf(stdout, "Error while removing file %s\n");
+                send(connection_socket, 0, sizeof(int), 0);
             }
         }
-
     }
 
     // recv(connection_socket, &count, sizeof(int), 0);
-    fprintf(stdout, "Files deleted sucessfully: %d, Error: %d\n", scount, count - scount - 1);
+    fprintf(stdout, "Files deleted. Success: %d, Error: %d\n", scount, count - scount - 1);
 }
 
 
@@ -313,6 +316,7 @@ void get_tar(int *cl_s, char *command, char *fname, int s_num, int *file_size) {
 
     recv_file(cl_s[s_num-2], fname, path, *file_size);
 
+    free(path);
 }
 
 
@@ -335,6 +339,7 @@ void send_tar(int cs, int *file_size, char *name) {
         fprintf(stdout, "Error while removing file %s\n");
     }
 
+    free(path);
 }
 
 
@@ -387,6 +392,7 @@ void downltar(int connection_socket, int count, char *tokens[], int *cl_s) {
         send_tar(connection_socket, &size, tar_path);
 
         free(base_dir);
+        free(tar_path);
     }
 
 }
@@ -397,18 +403,19 @@ int remove_dir(const struct dirent *entry) {
 }
 
 
-void dispfnames(int connection_socket, int count, char *token[], int *cl_s, char *buff ) {
+void dispfnames(int connection_socket, int count, char *token[], int *cl_s) {
 
     struct dirent **fname;
     char *path = token[1];
     int n;
+    char command[128];
+
     File_names f = { { NULL }, 0};
 
     char *abs_path = malloc(strlen(token[1]) + strlen(getenv("HOME")));
 
     strcpy(abs_path, getenv("HOME"));
-    strcat(abs_path, "/");
-    strcat(abs_path, token[1]);
+    strcat(abs_path, token[1] + 1);
 
     n = scandir(abs_path, &fname, remove_dir, alphasort);
     if (n < 0) {
@@ -416,37 +423,276 @@ void dispfnames(int connection_socket, int count, char *token[], int *cl_s, char
         return;
     }
 
+    fprintf(stdout, "Found %d files in %s\n", n, token[1]);
     for(int i=0; i<n; i++) {
         f.name[i] = strdup(fname[i]->d_name);
+            fprintf(stdout, "File %s\n", f.name[i]);
         f.count++;
     }
+
+    snprintf(command, sizeof(command), "dispfnames %s", token[1]);
 
     for(int i=0; i<3; i++) {
         
         File_names *other_files = malloc(sizeof(File_names));
 
-        send(cl_s[i], buff, strlen(buff), 0);
-        fprintf(stdout, "Sent command %s to S%d", buff, i+2);
+        fprintf(stdout, "Command: %s\n", command);
+        send(cl_s[i], command, strlen(command), 0);
+        fprintf(stdout, "Sent command %s to S%d\n", command, i+2);
 
-        recv(cl_s[i], other_files, sizeof(File_names), 0);
-        fprintf(stdout, "Received struct of size %d from S%d", sizeof(File_names), i+2);
+        recv(cl_s[i], &other_files->count, sizeof(int), 0);
 
         for(int j=0; j<other_files->count; j++) {
-            f.name[f.count+j] = other_files->name[j];
-            other_files->count++;
+
+            int len;
+            recv(cl_s[i], &len, sizeof(int), 0);
+
+            other_files->name[j] = malloc(len+1);
+            recv(cl_s[i], other_files->name[j], len, 0);
+
+        }
+        // recv(cl_s[i], other_files, sizeof(File_names), 0);
+        // fprintf(stdout, "Received struct of size %d from S%d", sizeof(File_names), i+2);
+
+        for(int k=0; k<other_files->count; k++) {
+            f.name[f.count+k] = other_files->name[k];
         }
         f.count += other_files->count;
 
-        for(int j=0; j<other_files->count; j++) {
-            free(other_files->name[j]);
-        }
-        free(other_files);
     }
 
-    send(connection_socket, &f, sizeof(f), 0);
+    fprintf(stdout, "Total files found %d\n", f.count);
 
-    for (int i = 0; i < n; i++) {
-        free(fname[i]);
+    send(connection_socket, &f.count, sizeof(int), 0);
+    for(int i=0; i<f.count; i++) {
+        int len = strlen(f.name[i]) + 1;
+        send(connection_socket, &len, sizeof(int), 0);
+
+        send(connection_socket, f.name[i], len, 0);
+    }
+
+    free(abs_path);
+}
+
+
+// void transfer_downlf(int *cl_s, char *filepath, int server_number, int client_socket) {
+//     char command[256];
+//     int file_size;
+    
+//     // Create command for the specific server
+//     snprintf(command, sizeof(command), "downlf %s", filepath);
+//     send(cl_s[server_number - 2], command, strlen(command), 0);
+//     // Receive file size from server
+//     recv(cl_s[server_number - 2], &file_size, sizeof(int), 0);
+//     fprintf(stdout, "File size received : %d bytes\n" ,file_size);
+    
+//     // Extract filename from filepath
+//     char *filename = strrchr(filepath, '/');
+//     if (filename) {
+//         filename++; // Skip the '/'
+//     } else {
+//         filename = filepath;
+//     }
+
+//     char *path = malloc(strlen(filepath) + strlen(getenv("HOME")));
+
+//     strcpy(path, getenv("HOME"));
+//     strcat(path, filepath+1);
+
+//     char *last_slash = strrchr(path, '/');
+//     if (last_slash != NULL) {
+//         *last_slash = '\0'; // Cut the string here
+//     }
+
+//     recv_file(cl_s[server_number-2], filename, path, file_size);
+    
+//     // Send file size to client
+//     send(client_socket, &file_size, sizeof(int), 0);
+//     fprintf(stdout, "File size sent\n");
+    
+
+//     send_file(client_socket, path);
+//     // // Forward file data from server to client
+//     // char buffer[1024];
+//     // int total_forwarded = 0;
+    
+//     // while (total_forwarded < file_size) {
+//     //     int to_receive = (file_size - total_forwarded > 1024) ? 1024 : (file_size - total_forwarded);
+//     //     int bytes_received = recv(cl_s[server_number - 2], buffer, to_receive, 0);
+        
+//     //     if (bytes_received <= 0) break;
+        
+//     //     send(client_socket, buffer, bytes_received, 0);
+//     //     total_forwarded += bytes_received;
+//     // }
+    
+//     // fprintf(stdout, "File %s forwarded to client (%d bytes)\n", filename, total_forwarded);
+// }
+
+
+// void downlff(int connection_socket, int count, char *tokens[], int *cl_s) {
+//     int num_files = count - 1; // Exclude command name
+    
+//     // Send number of files to client
+//     // send(connection_socket, &num_files, sizeof(int), 0);    
+//     for(int i = 1; i < count; i++) {
+//         char *filepath = tokens[i];
+//         char *ext = strrchr(filepath, '.');
+        
+//         if(!ext) {
+//             fprintf(stderr, "No file extension found for %s\n", filepath);
+//             continue;
+//         }
+        
+//         if(!strcmp(ext, ".c")) {
+//             // Handle .c files locally
+//             struct stat st;
+//             char *abs_path = get_abs_path(filepath);
+            
+//             if(stat(abs_path, &st) != 0) {
+//                 fprintf(stderr, "File %s not found\n", filepath);
+//                 free(abs_path);
+//                 continue;
+//             }
+            
+//             // Extract filename from filepath
+//             char *filename = strrchr(filepath, '/');
+//             if (filename) {
+//                 filename++; // Skip the '/'
+//             } else {
+//                 filename = filepath;
+//             }
+            
+//             // Send filename length and filename
+//             // int filename_len = strlen(filename);
+//             // send(connection_socket, &filename_len, sizeof(int), 0);
+//             // send(connection_socket, filename, filename_len, 0);
+            
+//             // Send file size
+//             int file_size = st.st_size;
+//             send(connection_socket, &file_size, sizeof(int), 0);
+            
+//             // Send file content
+//             send_file(connection_socket, abs_path);
+//             fprintf(stdout, "Local file %s sent to client\n", filename);
+            
+//             free(abs_path);
+            
+//         } else if(!strcmp(ext, ".pdf")) {
+//             transfer_downlf(cl_s, filepath, 2, connection_socket);
+            
+//         } else if(!strcmp(ext, ".txt")) {
+//             transfer_downlf(cl_s, filepath, 3, connection_socket);
+            
+//         } else if(!strcmp(ext, ".zip")) {
+//             transfer_downlf(cl_s, filepath, 4, connection_socket);
+//         }
+//     }
+    
+//     fprintf(stdout, "Download operation completed\n");
+// }
+
+
+void get_file(int *cl_s, char *fname, int server_num, int *file_size) {
+
+    char command[128];
+    int bytes_received;
+
+    snprintf(command, sizeof(command), "downlf %s", fname);
+    send(cl_s[server_num-2], command, strlen(command), 0);
+
+    bytes_received = recv(cl_s[server_num-2], file_size, sizeof(int), 0);
+    fprintf(stdout, "Size of file to receive is %d\n", *file_size);
+
+    char *path = malloc(strlen(getenv("HOME")) + strlen("/S1"));
+
+    strcpy(path, getenv("HOME"));
+    strcat(path, "/S1");
+
+    char *filename = strrchr(fname, '/');
+
+    recv_file(cl_s[server_num-2], filename + 1, path, *file_size);
+
+    free(path);
+
+}
+
+
+void download_file(int cl_s, int *file_size, char *fname) {
+
+    char *ext = strrchr(fname, '/');
+
+    char *path = malloc(strlen(getenv("HOME")) + strlen("/S1") + strlen(ext));
+
+    strcpy(path, getenv("HOME"));
+    strcat(path, "/S1");
+    strcat(path, ext);
+
+    fprintf(stdout, "Path to read the file %s\n", path);
+    send(cl_s, file_size, sizeof(int), 0);
+    fprintf(stdout, "Sent file size %d to client\n", *file_size);
+    
+    send_file(cl_s, path);
+
+    if(remove(path) == 0) {
+        fprintf(stdout, "File %s removed successfully\n", fname);
+    } else {
+        fprintf(stdout, "Error while removing file %s\n");
+    }
+
+    free(path);
+}
+
+
+void downlf(int connection_socket, int count, char *tokens[], int *cl_s) {
+    int file_size = 0;
+    char *fname;
+    
+    for(int i=1; i<count; i++) {
+
+        char *ext = strrchr(tokens[i], '.');
+
+        if(!strcmp(ext, ".txt")) {
+            
+            fprintf(stdout, "Going to send command downlf to S3\n");
+
+            get_file(cl_s, tokens[i], 3, &file_size);
+            fprintf(stdout, "Going to download now\n");
+            download_file(connection_socket, &file_size, tokens[i]);
+
+        } else if(!strcmp(ext, ".pdf")) {
+
+            fprintf(stdout, "Going to send command downlf to S2\n");
+
+            get_file(cl_s, tokens[i], 2, &file_size);
+            download_file(connection_socket, &file_size, tokens[i]);
+
+        } else if(!strcmp(ext, ".zip")) {
+
+            fprintf(stdout, "Going to send command downlf to S4\n");
+
+            get_file(cl_s, tokens[i], 4, &file_size);
+            download_file(connection_socket, &file_size, tokens[i]);
+            
+        } else {
+            char *base_path = malloc(strlen(getenv("HOME") + strlen(tokens[i] + 1)));
+            struct stat st;
+
+            strcpy(base_path, getenv("HOME"));
+            strcat(base_path, tokens[i] + 1);
+
+            stat(base_path, &st);
+            int size = st.st_size;
+
+            fprintf(stdout, "Path to read the file %s\n", base_path);
+            send(connection_socket, &size, sizeof(int), 0);
+            fprintf(stdout, "Sent file size %d to client\n", size);
+            
+            send_file(connection_socket, base_path);
+
+            free(base_path);
+
+        }
     }
 
 }
@@ -474,7 +720,7 @@ void prcclient(int conn_soc, int *cl_s) {
 
         } else if(!strcmp(tokens[0], "downlf")) {
 
-            // downlf(conn_soc, count, tokens);
+            downlf(conn_soc, count, tokens, cl_s);
 
         } else if(!strcmp(tokens[0], "removef")) {
 
@@ -486,8 +732,19 @@ void prcclient(int conn_soc, int *cl_s) {
 
         } else if(!strcmp(tokens[0], "dispfnames")) {
 
-            dispfnames(conn_soc, count, tokens, cl_s, buff);
+            dispfnames(conn_soc, count, tokens, cl_s);
 
+        } else {
+
+            fprintf(stdout, "Invalid command\n");
+        
+        }
+
+        for(int i = 0; i < count; i++) {
+            if(tokens[i] != NULL) {
+                free(tokens[i]);
+                tokens[i] = NULL;
+            }
         }
     }
 }
