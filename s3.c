@@ -1,20 +1,3 @@
-/*
- * S3 File Server
- * 
- * This program implements a file server (S3) that is part of a distributed
- * file system. It handles file operations including upload, download, removal,
- * tar creation, and directory listing. The server communicates with other
- * servers (S1, S4) and maintains files in a local S3 directory structure.
- * 
- * Server Details:
- * - Name: S3
- * - Port: 15085
- * - IP: 127.0.0.1 (localhost)
- * - Base Directory: $HOME/S3
- * 
- * This server works in conjunction with S1 (coordinator) and S4 servers
- * to provide distributed file storage and management capabilities.
- */
 
 #define _DEFAULT_SOURCE
 
@@ -41,12 +24,9 @@ typedef struct {
     int count;          // Number of files in the directory
 } File_names;
 
-/**
+/*
  * Splits a command string into individual tokens
  * Used to parse incoming commands from clients into separate arguments
- * @param buffer: Input command string to be tokenized
- * @param result: Array to store resulting tokens
- * @return: Number of tokens parsed from the command
  */
 int split_command(char *buffer, char** result) {
     // Tokenize by space and tab characters
@@ -66,11 +46,9 @@ int split_command(char *buffer, char** result) {
     return count;
 }
 
-/**
+/*
  * Converts a relative path (starting with ~) to absolute path
  * Expands the home directory symbol to the actual home directory path
- * @param path: Relative path starting with ~ (e.g., ~/S1/documents/file.txt)
- * @return: Absolute path string (caller must free the returned memory)
  */
 char* get_abs_path(char *path) {
     char *home = getenv("HOME");
@@ -83,11 +61,9 @@ char* get_abs_path(char *path) {
     return expand;
 }
 
-/**
+/*
  * Creates destination directory path and converts S1 references to S3
  * Also creates the directory structure if it doesn't exist using mkdir -p
- * @param path: Original path (may contain S1 reference)
- * @return: Absolute path with S1 changed to S3 (caller must free)
  */
 char* create_dest(char *path) {
     char command[256];
@@ -106,13 +82,9 @@ char* create_dest(char *path) {
     return abs_path;
 }
 
-/**
+/*
  * Receives a file from socket connection and saves it to disk
  * Handles file transfer by receiving data in chunks and writing to file
- * @param co_s: Socket file descriptor for receiving data
- * @param name: Name of file to create on disk
- * @param path: Directory path where file should be saved
- * @param file_size: Expected size of incoming file in bytes
  */
 void recv_file(int co_s, char *name, char *path, int file_size) {
     char buffer[1024];
@@ -166,11 +138,9 @@ void recv_file(int co_s, char *name, char *path, int file_size) {
     fprintf(stdout, "File %s created. Total %d bytes written.\n", name, total_received);
 }
 
-/**
+/*
  * Sends a file over socket connection
  * Reads file from disk and transmits it in chunks over the network
- * @param cl_s: Socket file descriptor for sending data
- * @param name: Path to file that should be sent
  */
 void send_file(int cl_s, char *name) {
     int bytes_read;
@@ -209,13 +179,10 @@ void send_file(int cl_s, char *name) {
     close(fd);
 }
 
-/**
+/*
  * Handles file upload operation
  * Receives a file from client and stores it in the appropriate S3 directory
  * Protocol: client sends file size first, then file content
- * @param connection_socket: Client socket file descriptor
- * @param count: Number of command tokens
- * @param tokens: Array of command tokens [uploadf, filename, destination_path]
  */
 void uploadf(int connection_socket, int count, char *tokens[]) {
     int file_size = 0;
@@ -240,12 +207,9 @@ void uploadf(int connection_socket, int count, char *tokens[]) {
     free(path);  // Clean up allocated memory
 }
 
-/**
+/*
  * Handles file removal operation
  * Removes a file from the S3 directory and sends result status to client
- * @param connection_socket: Client socket file descriptor
- * @param count: Number of command tokens
- * @param tokens: Array of command tokens [removef, filename, path]
  */
 void removef(int connection_socket, int count, char *tokens[]) {
     int file_size = 0, res = 0;
@@ -276,13 +240,10 @@ void removef(int connection_socket, int count, char *tokens[]) {
     free(abs_path);  // Clean up allocated memory
 }
 
-/**
+/*
  * Handles tar file creation and download operation
  * Creates a tar archive of all files in S3 directory and sends it to client
  * The tar file is temporarily created, sent, and then removed
- * @param connection_socket: Client socket file descriptor
- * @param count: Number of command tokens
- * @param token: Array of command tokens [downltar, file_type]
  */
 void downltar(int connection_socket, int count, char *token[]) {
     char cmd[512];
@@ -336,23 +297,18 @@ void downltar(int connection_socket, int count, char *token[]) {
     free(tar_path);
 }
 
-/**
+/*
  * Filter function for scandir - selects only regular files
  * Used to exclude directories from file listings
- * @param entry: Directory entry to examine
- * @return: 1 if entry is a regular file, 0 if it's a directory or other type
  */
 int remove_dir(const struct dirent *entry) {
     return entry->d_type == DT_REG; // Keep only regular files (exclude directories)
 }
 
-/**
+/*
  * Handles display filenames operation
  * Lists all regular files in the specified S3 directory and sends list to client
  * Protocol: sends file count first, then for each file sends length + filename
- * @param connection_socket: Client socket file descriptor
- * @param count: Number of command tokens
- * @param token: Array of command tokens [dispfnames, path]
  */
 void dispfnames(int connection_socket, int count, char *token[]) {
     struct dirent **fname;
@@ -383,10 +339,13 @@ void dispfnames(int connection_socket, int count, char *token[]) {
 
     // Store file names in structure and display them
     for(int i = 0; i < n; i++) {
-        fprintf(stdout, "%s\n", fname[i]->d_name);
-        f.name[i] = strdup(fname[i]->d_name);
-        fprintf(stdout, "Filename: %s\n", f.name[i]);
-        f.count++;
+        char *ext = strrchr(fname[i]->d_name, '.');
+        // fprintf(stdout, "%s\n", fname[i]->d_name);
+        if((strcmp(ext, ".txt") == 0)) {
+            f.name[i] = strdup(fname[i]->d_name);
+            // fprintf(stdout, "Filename: %s\n", f.name[i]);
+            f.count++;
+        }
     }
 
     // Send number of files to client first
@@ -411,50 +370,12 @@ void dispfnames(int connection_socket, int count, char *token[]) {
     free(abs_path);
 }
 
-/**
+
+/*
  * Handles file download operation
  * Sends a specific file from S3 directory to client
  * Protocol: sends file size first, then file content (or 0 size if file not found)
- * @param connection_socket: Client socket file descriptor
- * @param count: Number of command tokens
- * @param tokens: Array of command tokens [downlf, filepath]
  */
-void downlff(int connection_socket, int count, char *tokens[]) {
-    char *filepath = tokens[1]; // File path to download
-    struct stat st;
-    
-    // Convert S1 path to local S3 server path
-    char *abs_path = get_abs_path(filepath);
-    char *pos = strstr(abs_path, "S1");
-    if(pos != NULL) {
-        pos[1] = '3';  // Change S1 to S3
-    }
-    
-    fprintf(stdout, "Looking for file: %s\n", abs_path);
-    
-    // Check if file exists and get its statistics
-    if(stat(abs_path, &st) != 0) {
-        fprintf(stderr, "File %s not found\n", abs_path);
-        // Send 0 size to indicate file not found
-        int file_size = 0;
-        send(connection_socket, &file_size, sizeof(int), 0);
-        free(abs_path);
-        return;
-    }
-    
-    // Send file size to client first
-    int file_size = st.st_size;
-    send(connection_socket, &file_size, sizeof(int), 0);
-    fprintf(stdout, "Sending file size: %d\n", file_size);
-    
-    // Send file content to client
-    send_file(connection_socket, abs_path);
-    fprintf(stdout, "File %s sent to S1\n", filepath);
-    
-    free(abs_path);
-}
-
-
 void downlf(int connection_socket, int count, char *tokens[]) {
 
     char *filepath = tokens[1];
@@ -491,11 +412,10 @@ void downlf(int connection_socket, int count, char *tokens[]) {
 
 
 
-/**
+/*
  * Main server function
  * Sets up socket server, binds to port 15085, accepts connections and processes commands
  * Runs in an infinite loop handling client requests for file operations
- * @return: 0 on successful completion (never reached due to infinite loop)
  */
 int main() {
     int ls, cs, csd, portNumber, pid, port;

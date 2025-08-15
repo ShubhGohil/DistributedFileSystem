@@ -56,11 +56,8 @@ int connect_server(int argc, char* argv[]) {
     return client_socket;
 }
 
-/**
+/*
  * Validates that the first argument matches the expected command name
- * @param files: Array of parsed command arguments
- * @param command: Expected command name
- * @return: PASS if command name matches, FAIL otherwise
  */
 int check_name(char *files[], char *command) {
     if(strcmp(files[0], command)) {
@@ -70,10 +67,8 @@ int check_name(char *files[], char *command) {
     return PASS;
 }
 
-/**
+/*
  * Verifies that a file path exists and is accessible
- * @param name: File path to check
- * @return: PASS if file exists, FAIL otherwise
  */
 int verify_path(char *name) {
     if(!access(name, F_OK))  // F_OK checks for file existence
@@ -82,10 +77,8 @@ int verify_path(char *name) {
     return FAIL;
 }
 
-/**
+/*
  * Validates file extension against allowed types (.pdf, .c, .txt, .zip)
- * @param name: File name to check
- * @return: PASS if extension is valid, FAIL otherwise
  */
 int verify_ext(char *name) {
     // Find the last occurrence of '.' in the filename
@@ -100,11 +93,8 @@ int verify_ext(char *name) {
     return PASS;
 }
 
-/**
+/*
  * Validates file paths and extensions for multiple files
- * @param files: Array of file paths
- * @param count: Number of files to check
- * @return: PASS if all files are valid, FAIL otherwise
  */
 int check_file_path_and_ext(char *files[], int count) {
     int check = 1;
@@ -117,13 +107,9 @@ int check_file_path_and_ext(char *files[], int count) {
     return PASS;
 }
 
-/**
+/*
  * Parses and validates upload command arguments
  * Format: uploadf <file1> [file2] ... ~/S1/<path>
- * @param input: Raw command input string
- * @param files: Array to store parsed arguments
- * @param i: Pointer to store argument count
- * @return: PASS if command is valid, FAIL otherwise
  */
 int parse_command_up(char *input, char* files[], int *i) {
     *i=0;
@@ -152,13 +138,9 @@ int parse_command_up(char *input, char* files[], int *i) {
     return (check_name(files, "uploadf") && check_file_path_and_ext(files, *i));
 }
 
-/**
+/*
  * Parses and validates remove file command arguments
  * Format: removef <filename> ~/S1/<path>
- * @param input: Raw command input string
- * @param files: Array to store parsed arguments
- * @param i: Pointer to store argument count
- * @return: PASS if command is valid, FAIL otherwise
  */
 int parse_command_rm(char *input, char* files[], int *i) {
     *i=0;
@@ -186,13 +168,9 @@ int parse_command_rm(char *input, char* files[], int *i) {
     return (check_name(files, "removef"));
 }
 
-/**
+/*
  * Parses and validates download tar command arguments
  * Format: downltar <.pdf|.txt|.c>
- * @param input: Raw command input string
- * @param files: Array to store parsed arguments
- * @param i: Pointer to store argument count
- * @return: PASS if command is valid, FAIL otherwise
  */
 int parse_command_tar(char *input, char* files[], int *i) {
     *i = 0;
@@ -221,13 +199,9 @@ int parse_command_tar(char *input, char* files[], int *i) {
     return (check_name(files, "downltar"));
 }
 
-/**
+/*
  * Parses and validates display filenames command arguments
  * Format: dispfnames <path>
- * @param input: Raw command input string
- * @param files: Array to store parsed arguments
- * @param i: Pointer to store argument count
- * @return: PASS if command is valid, FAIL otherwise
  */
 int parse_command_disp(char *input, char* files[], int *i) {
     *i = 0;
@@ -249,13 +223,9 @@ int parse_command_disp(char *input, char* files[], int *i) {
     return (check_name(files, "dispfnames"));
 }
 
-/**
+/*
  * Parses and validates download file command arguments
  * Format: downlf <file1> [file2] (files must be in ~/S1 path)
- * @param input: Raw command input string
- * @param files: Array to store parsed arguments
- * @param i: Pointer to store argument count
- * @return: PASS if command is valid, FAIL otherwise
  */
 int parse_command_dwn(char *input, char* files[], int *i) {
 
@@ -295,10 +265,8 @@ int parse_command_dwn(char *input, char* files[], int *i) {
     return (check_name(files, "downlf"));
 }
 
-/**
+/*
  * Sends a file over the socket connection
- * @param cl_s: Client socket file descriptor
- * @param name: Path to file to send
  */
 void send_file(int cl_s, char *name) {
     int bytes_read, total_sent = 0;
@@ -323,11 +291,8 @@ void send_file(int cl_s, char *name) {
     fprintf(stdout, "File name: %s, Total bytes: %d\n", name, total_sent);
 }
 
-/**
+/*
  * Receives a file from the socket connection
- * @param co_s: Client socket file descriptor
- * @param name: Name of file to create
- * @param file_size: Expected size of file to receive
  */
 void recv_file(int co_s, char *name, int file_size) {
     char buffer[1024];
@@ -374,13 +339,9 @@ void recv_file(int co_s, char *name, int file_size) {
     fprintf(stdout, "File %s created. Total %d bytes written.\n", name, total_received);
 }
 
-/**
+/*
  * Handles file upload operation
  * Sends command and then uploads each specified file
- * @param cl_s: Client socket file descriptor
- * @param input: Original command string
- * @param files: Parsed command arguments
- * @param count: Number of arguments
  */
 void uploadf(int cl_s, char *input, char *files[], int *count) {
     // Send command string to server
@@ -406,13 +367,9 @@ void uploadf(int cl_s, char *input, char *files[], int *count) {
     fprintf(stdout, "\nFiles uploaded\n");
 }
 
-/**
+/*
  * Handles file removal operation
  * Sends remove command to server
- * @param cl_s: Client socket file descriptor
- * @param input: Original command string
- * @param files: Parsed command arguments
- * @param count: Number of arguments
  */
 void removef(int cl_s, char *input, char *files[], int *count) {
     
@@ -432,13 +389,9 @@ void removef(int cl_s, char *input, char *files[], int *count) {
     }
 }
 
-/**
+/*
  * Handles download tar file operation
  * Requests and downloads a tar file containing files of specified type
- * @param cl_s: Client socket file descriptor
- * @param input: Original command string
- * @param files: Parsed command arguments
- * @param count: Number of arguments
  */
 void downltar(int cl_s, char *input, char *files[], int *count) {
     // Send command to server
@@ -462,13 +415,9 @@ void downltar(int cl_s, char *input, char *files[], int *count) {
     free(fname);  // Clean up allocated memory
 }
 
-/**
+/*
  * Handles display filenames operation
  * Requests and displays list of files from server
- * @param cl_s: Client socket file descriptor
- * @param input: Original command string
- * @param files: Parsed command arguments
- * @param count: Number of arguments
  */
 void dispfnames(int cl_s, char *input, char *files[], int *count) {
     File_names *file_names = malloc(sizeof(File_names));
@@ -482,7 +431,7 @@ void dispfnames(int cl_s, char *input, char *files[], int *count) {
     bytes_read = recv(cl_s, &file_names->count, sizeof(int), 0);
     fprintf(stdout, "Received %d bytes from the server S1\n", bytes_read);
 
-    fprintf(stdout, "The files under the path is:\n");
+    fprintf(stdout, "The files under given path is/are:\n");
     
     // Receive each filename
     for(int i=0; i<file_names->count; i++) {
@@ -504,44 +453,11 @@ void dispfnames(int cl_s, char *input, char *files[], int *count) {
     free(file_names);
 }
 
-/**
+
+/*
  * Handles download file operation
  * Downloads specified files from server
- * @param cl_s: Client socket file descriptor
- * @param input: Original command string
- * @param files: Parsed command arguments
- * @param count: Number of arguments
  */
-void downlff(int cl_s, char *input, char *files[], int *count) {
-    // Send command to server
-    send(cl_s, input, strlen(input), 0);
-    
-    // Download each requested file
-    for (int i = 1; i < *count; i++) {  // Skip command name
-        // Extract filename from full path (get part after last '/')
-        char *filename = strrchr(files[i], '/');
-        if (filename) {
-            filename++;  // Move past the '/'
-        } else {
-            filename = files[i];  // Use full name if no path separator
-        }
-        
-        // Create local copy of filename for file creation
-        char *local_filename = strdup(filename);
-        
-        // Receive file size
-        int file_size;
-        recv(cl_s, &file_size, sizeof(int), 0);
-        
-        // Receive the file
-        recv_file(cl_s, local_filename, file_size);
-        
-        free(local_filename);  // Clean up
-    }
-    fprintf(stdout, "Files downloaded successfully\n");
-}
-
-
 void downlf(int cl_s, char *input, char *files[], int *count) {
     send(cl_s, input, strlen(input), 0);
 
@@ -555,9 +471,8 @@ void downlf(int cl_s, char *input, char *files[], int *count) {
 }
 
 
-/**
+/*
  * Main command loop - reads user input and executes commands
- * @param cl_s: Client socket file descriptor
  */
 void get_commands(int cl_s) {
     char input[MAX_ARGS];
@@ -607,11 +522,8 @@ void get_commands(int cl_s) {
     }
 }
 
-/**
+/*
  * Main function - establishes server connection and starts command loop
- * @param argc: Command line argument count
- * @param argv: Command line arguments [program_name] [server_ip] [port]
- * @return: 0 on successful completion
  */
 int main(int argc, char *argv[]) {
     // Establish connection to server

@@ -266,7 +266,7 @@ int transfer_rm(int *cl_s, char *path, int server_number) {
 
 
 void removef(int connection_socket, int count, char *tokens[], int *cl_s) {
-    int file_size = 0, scount = 0;
+    int file_size = 0, scount = 0, res = 0, prev = scount;
 
     for(int i=1; i<count; i++) {
 
@@ -287,13 +287,20 @@ void removef(int connection_socket, int count, char *tokens[], int *cl_s) {
         } else {
             if(remove(get_abs_path(tokens[i])) == 0) {
                 fprintf(stdout, "File %s removed successfully\n", tokens[i]);
-                send(connection_socket, 1, sizeof(int), 0);
                 scount++;
             } else {
                 fprintf(stdout, "Error while removing file %s\n");
-                send(connection_socket, 0, sizeof(int), 0);
             }
         }
+
+        if(prev < scount) {
+            res = 1;
+            send(connection_socket, &res, sizeof(int), 0);
+        } else {
+            res = 0;
+            send(connection_socket, &res, sizeof(int), 0);
+        }
+
     }
 
     // recv(connection_socket, &count, sizeof(int), 0);
@@ -473,124 +480,6 @@ void dispfnames(int connection_socket, int count, char *token[], int *cl_s) {
 
     free(abs_path);
 }
-
-
-// void transfer_downlf(int *cl_s, char *filepath, int server_number, int client_socket) {
-//     char command[256];
-//     int file_size;
-    
-//     // Create command for the specific server
-//     snprintf(command, sizeof(command), "downlf %s", filepath);
-//     send(cl_s[server_number - 2], command, strlen(command), 0);
-//     // Receive file size from server
-//     recv(cl_s[server_number - 2], &file_size, sizeof(int), 0);
-//     fprintf(stdout, "File size received : %d bytes\n" ,file_size);
-    
-//     // Extract filename from filepath
-//     char *filename = strrchr(filepath, '/');
-//     if (filename) {
-//         filename++; // Skip the '/'
-//     } else {
-//         filename = filepath;
-//     }
-
-//     char *path = malloc(strlen(filepath) + strlen(getenv("HOME")));
-
-//     strcpy(path, getenv("HOME"));
-//     strcat(path, filepath+1);
-
-//     char *last_slash = strrchr(path, '/');
-//     if (last_slash != NULL) {
-//         *last_slash = '\0'; // Cut the string here
-//     }
-
-//     recv_file(cl_s[server_number-2], filename, path, file_size);
-    
-//     // Send file size to client
-//     send(client_socket, &file_size, sizeof(int), 0);
-//     fprintf(stdout, "File size sent\n");
-    
-
-//     send_file(client_socket, path);
-//     // // Forward file data from server to client
-//     // char buffer[1024];
-//     // int total_forwarded = 0;
-    
-//     // while (total_forwarded < file_size) {
-//     //     int to_receive = (file_size - total_forwarded > 1024) ? 1024 : (file_size - total_forwarded);
-//     //     int bytes_received = recv(cl_s[server_number - 2], buffer, to_receive, 0);
-        
-//     //     if (bytes_received <= 0) break;
-        
-//     //     send(client_socket, buffer, bytes_received, 0);
-//     //     total_forwarded += bytes_received;
-//     // }
-    
-//     // fprintf(stdout, "File %s forwarded to client (%d bytes)\n", filename, total_forwarded);
-// }
-
-
-// void downlff(int connection_socket, int count, char *tokens[], int *cl_s) {
-//     int num_files = count - 1; // Exclude command name
-    
-//     // Send number of files to client
-//     // send(connection_socket, &num_files, sizeof(int), 0);    
-//     for(int i = 1; i < count; i++) {
-//         char *filepath = tokens[i];
-//         char *ext = strrchr(filepath, '.');
-        
-//         if(!ext) {
-//             fprintf(stderr, "No file extension found for %s\n", filepath);
-//             continue;
-//         }
-        
-//         if(!strcmp(ext, ".c")) {
-//             // Handle .c files locally
-//             struct stat st;
-//             char *abs_path = get_abs_path(filepath);
-            
-//             if(stat(abs_path, &st) != 0) {
-//                 fprintf(stderr, "File %s not found\n", filepath);
-//                 free(abs_path);
-//                 continue;
-//             }
-            
-//             // Extract filename from filepath
-//             char *filename = strrchr(filepath, '/');
-//             if (filename) {
-//                 filename++; // Skip the '/'
-//             } else {
-//                 filename = filepath;
-//             }
-            
-//             // Send filename length and filename
-//             // int filename_len = strlen(filename);
-//             // send(connection_socket, &filename_len, sizeof(int), 0);
-//             // send(connection_socket, filename, filename_len, 0);
-            
-//             // Send file size
-//             int file_size = st.st_size;
-//             send(connection_socket, &file_size, sizeof(int), 0);
-            
-//             // Send file content
-//             send_file(connection_socket, abs_path);
-//             fprintf(stdout, "Local file %s sent to client\n", filename);
-            
-//             free(abs_path);
-            
-//         } else if(!strcmp(ext, ".pdf")) {
-//             transfer_downlf(cl_s, filepath, 2, connection_socket);
-            
-//         } else if(!strcmp(ext, ".txt")) {
-//             transfer_downlf(cl_s, filepath, 3, connection_socket);
-            
-//         } else if(!strcmp(ext, ".zip")) {
-//             transfer_downlf(cl_s, filepath, 4, connection_socket);
-//         }
-//     }
-    
-//     fprintf(stdout, "Download operation completed\n");
-// }
 
 
 void get_file(int *cl_s, char *fname, int server_num, int *file_size) {

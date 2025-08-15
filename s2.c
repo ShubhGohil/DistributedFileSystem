@@ -22,11 +22,8 @@ typedef struct {
     int count;          // Number of files
 } File_names;
 
-/**
+/*
  * Splits a command string into tokens separated by spaces or tabs
- * @param buffer: Input command string to split
- * @param result: Array to store the resulting tokens
- * @return: Number of tokens found
  */
 int split_command(char *buffer, char** result) {
     
@@ -46,10 +43,8 @@ int split_command(char *buffer, char** result) {
     return count;
 }
 
-/**
+/*
  * Converts a relative path starting with '~' to absolute path
- * @param path: Relative path starting with '~'
- * @return: Absolute path with HOME directory prepended
  */
 char* get_abs_path(char *path) {
     char *home = getenv("HOME");
@@ -61,10 +56,8 @@ char* get_abs_path(char *path) {
     return expand;
 }
 
-/**
+/*
  * Creates destination directory path and converts S1 references to S2
- * @param path: Original path (may contain S1 reference)
- * @return: Absolute path with S2 directory created
  */
 char* create_dest(char *path) {
     
@@ -84,12 +77,8 @@ char* create_dest(char *path) {
     return abs_path;
 }
 
-/**
+/*
  * Receives a file from client over socket connection
- * @param co_s: Connected socket descriptor
- * @param name: Name of file to create
- * @param path: Directory path where file should be stored
- * @param file_size: Expected size of incoming file
  */
 void recv_file(int co_s, char *name, char *path, int file_size) {
 
@@ -139,10 +128,8 @@ void recv_file(int co_s, char *name, char *path, int file_size) {
     close(fd);
 }
 
-/**
+/*
  * Sends a file to client over socket connection
- * @param cl_s: Connected socket descriptor
- * @param name: Name of file to send
  */
 void send_file(int cl_s, char *name) {
     int bytes_read;
@@ -180,12 +167,9 @@ void send_file(int cl_s, char *name) {
     close(fd);
 }
 
-/**
+/*
  * Handles file upload command from client
  * Protocol: Receives file size, then file data
- * @param connection_socket: Connected socket descriptor
- * @param count: Number of command tokens
- * @param tokens: Array of command tokens [uploadf, filename, destination_path]
  */
 void uploadf(int connection_socket, int count, char *tokens[]) {
     int file_size = 0;
@@ -209,11 +193,8 @@ void uploadf(int connection_socket, int count, char *tokens[]) {
     free(path);
 }
 
-/**
+/*
  * Handles file removal command from client
- * @param connection_socket: Connected socket descriptor
- * @param count: Number of command tokens
- * @param tokens: Array of command tokens [removef, filepath]
  */
 void removef(int connection_socket, int count, char *tokens[]) {
     int file_size = 0, res = 0;
@@ -240,11 +221,8 @@ void removef(int connection_socket, int count, char *tokens[]) {
     free(abs_path);
 }
 
-/**
+/*
  * Creates and sends a tar archive of all files in S2 directory
- * @param connection_socket: Connected socket descriptor
- * @param count: Number of command tokens
- * @param token: Array of command tokens
  */
 void downltar(int connection_socket, int count, char *token[]) {
 
@@ -287,20 +265,15 @@ void downltar(int connection_socket, int count, char *token[]) {
     free(tar_path);
 }
 
-/**
+/*
  * Filter function for scandir - keeps only regular files
- * @param entry: Directory entry to check
- * @return: 1 if regular file, 0 otherwise
  */
 int remove_dir(const struct dirent *entry) {
     return entry->d_type == DT_REG; // Keep only regular files
 }
 
-/**
+/*
  * Sends list of filenames in specified directory to client
- * @param connection_socket: Connected socket descriptor
- * @param count: Number of command tokens
- * @param token: Array of command tokens [dispfnames, directory_path]
  */
 void dispfnames(int connection_socket, int count, char *token[]) {
 
@@ -330,9 +303,12 @@ void dispfnames(int connection_socket, int count, char *token[]) {
 
     // Store filenames in structure
     for(int i=0; i<n; i++) {
-        f.name[i] = strdup(fname[i]->d_name);
-        f.count++;
-        free(fname[i]);    // Free scandir allocated memory
+        char *ext = strrchr(fname[i]->d_name, '.');
+        if((strcmp(ext, ".pdf") == 0)) {
+            f.name[i] = strdup(fname[i]->d_name);
+            f.count++;
+            free(fname[i]);    // Free scandir allocated memory
+        }
     }
     free(fname);
 
@@ -351,47 +327,10 @@ void dispfnames(int connection_socket, int count, char *token[]) {
     free(abs_path);
 }
 
-/**
+
+/*
  * Handles file download request from client
- * @param connection_socket: Connected socket descriptor
- * @param count: Number of command tokens
- * @param tokens: Array of command tokens [downlf, filepath]
  */
-void downlff(int connection_socket, int count, char *tokens[]) {
-    char *filepath = tokens[1]; // File path to download
-    struct stat st;
-    
-    // Convert S1 path to local server path (S2)
-    char *abs_path = get_abs_path(filepath);
-    char *pos = strstr(abs_path, "S1");
-    if(pos != NULL) {
-        pos[1] = '2';
-    }
-    
-    fprintf(stdout, "Looking for file: %s\n", abs_path);
-    
-    // Check if file exists
-    if(stat(abs_path, &st) != 0) {
-        fprintf(stderr, "File %s not found\n", abs_path);
-        int file_size = 0;
-        send(connection_socket, &file_size, sizeof(int), 0);    // Send 0 size to indicate error
-        free(abs_path);
-        return;
-    }
-    
-    // Send file size first
-    int file_size = st.st_size;
-    send(connection_socket, &file_size, sizeof(int), 0);
-    fprintf(stdout, "Sending file size: %d\n", file_size);
-    
-    // Send file content
-    send_file(connection_socket, abs_path);
-    fprintf(stdout, "File %s sent to S1\n", filepath);
-    
-    free(abs_path);
-}
-
-
 void downlf(int connection_socket, int count, char *tokens[]) {
 
     char *filepath = tokens[1];
